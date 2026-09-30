@@ -304,3 +304,62 @@ class TestWalletBackupService:
         )
         assert updated.label == "New Label"
         assert updated.wallet_address == "0x" + "b" * 40
+
+    def test_backup_links_to_wallet_and_logs_activity(
+        self, wallet_service, test_user, sample_passphrase
+    ):
+        from app.models.wallet import Wallet, WalletActivity
+
+        wallet = Wallet(
+            user_id=test_user.id,
+            label="Main",
+            address="0x" + "c" * 40,
+            chain="huanchain",
+        )
+        wallet_service.db.add(wallet)
+        wallet_service.db.commit()
+        wallet_service.db.refresh(wallet)
+
+        backup = wallet_service.create_backup(
+            user=test_user,
+            label="Main backup",
+            encrypted_data=enc("d", sample_passphrase),
+            passphrase=sample_passphrase,
+            salt=SALT,
+            kdf_iterations=ITER,
+            wallet_id=wallet.id,
+        )
+        assert backup.wallet_id == wallet.id
+
+        actions = [
+            a.action
+            for a in wallet_service.db.query(WalletActivity)
+            .filter(WalletActivity.wallet_id == wallet.id)
+            .all()
+        ]
+        assert "backup_created" in actions
+
+    def test_restore_and_delete_log_activity(
+        self, wallet_service, test_user, sample_passphrase
+    ):
+        from app.models.wallet import WalletActivity
+
+        backup = wallet_service.create_backup(
+            user=test_user,
+            label="W",
+            encrypted_data=enc("d", sample_passphrase),
+            passphrase=sample_passphrase,
+            salt=SALT,
+            kdf_iterations=ITER,
+        )
+        wallet_service.restore_backup(test_user, backup.id, sample_passphrase)
+        wallet_service.delete_backup(test_user, backup.id)
+
+        actions = [
+            a.action
+            for a in wallet_service.db.query(WalletActivity)
+            .filter(WalletActivity.user_id == test_user.id)
+            .all()
+        ]
+        assert "backup_restored" in actions
+        assert "backup_deleted" in actions

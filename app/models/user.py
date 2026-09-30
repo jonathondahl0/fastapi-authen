@@ -20,6 +20,7 @@ class User(Base):
     sessions = relationship("UserSession", back_populates="user")
     mfa_settings = relationship("MFASettings", back_populates="user", uselist=False)
     api_keys = relationship("APIKey", back_populates="user")
+    wallets = relationship("Wallet", back_populates="user")
     wallet_backups = relationship("WalletBackup", back_populates="user")
 
 class UserSession(Base):
