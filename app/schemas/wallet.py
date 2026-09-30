@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, validator
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field, validator
 
 
 class WalletBackupCreate(BaseModel):
@@ -11,6 +12,7 @@ class WalletBackupCreate(BaseModel):
     with the KDF parameters it used. The server never sees the plaintext and
     never stores the passphrase — only a verifier derived from it.
     """
+
     label: str = Field(..., min_length=1, max_length=100, description="Wallet label")
     wallet_address: Optional[str] = Field(
         None, max_length=128, description="Public wallet address (optional)"
@@ -48,9 +50,13 @@ class WalletBackupCreate(BaseModel):
             # EVM-style addresses: 0x + 40 hex chars
             if v.lower().startswith("0x"):
                 if len(v) != 42:
-                    raise ValueError("EVM address must be 0x followed by 40 hex characters")
+                    raise ValueError(
+                        "EVM address must be 0x followed by 40 hex characters"
+                    )
                 if not all(c in "0123456789abcdefABCDEF" for c in v[2:]):
-                    raise ValueError("EVM address must contain only hex characters after 0x")
+                    raise ValueError(
+                        "EVM address must contain only hex characters after 0x"
+                    )
         return v
 
     @validator("salt")
@@ -66,12 +72,14 @@ class WalletBackupCreate(BaseModel):
 
 class WalletBackupUpdate(BaseModel):
     """Payload for updating wallet backup metadata (not the encrypted data)."""
+
     label: Optional[str] = Field(None, min_length=1, max_length=100)
     wallet_address: Optional[str] = Field(None, max_length=128)
 
 
 class WalletBackupMeta(BaseModel):
     """Wallet backup metadata returned in listings (never exposes ciphertext)."""
+
     id: int
     label: str
     wallet_address: Optional[str] = None
@@ -88,6 +96,7 @@ class WalletBackupMeta(BaseModel):
 
 class WalletBackupResponse(WalletBackupMeta):
     """Full backup record including ciphertext (for restore flows)."""
+
     ciphertext: str
 
 
@@ -98,11 +107,13 @@ class WalletRestoreRequest(BaseModel):
     passphrase-derived key. The verifier is used server-side only to reject
     obviously wrong passphrases without exposing the wallet data.
     """
+
     passphrase: str = Field(..., min_length=8, max_length=256)
 
 
 class WalletRestoreResponse(BaseModel):
     """Restore response with everything the client needs to decrypt locally."""
+
     id: int
     label: str
     ciphertext: str

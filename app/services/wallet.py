@@ -13,7 +13,7 @@ import base64
 import hashlib
 import secrets
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -64,19 +64,25 @@ class WalletBackupService:
         return base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8")))
 
     @classmethod
-    def encrypt_payload(cls, payload: str, passphrase: str, salt: bytes, iterations: int) -> str:
+    def encrypt_payload(
+        cls, payload: str, passphrase: str, salt: bytes, iterations: int
+    ) -> str:
         """Encrypt a payload string with a passphrase-derived Fernet key."""
         key = cls.derive_key(passphrase, salt, iterations)
         return Fernet(key).encrypt(payload.encode("utf-8")).decode("utf-8")
 
     @classmethod
-    def decrypt_payload(cls, token: str, passphrase: str, salt: bytes, iterations: int) -> str:
+    def decrypt_payload(
+        cls, token: str, passphrase: str, salt: bytes, iterations: int
+    ) -> str:
         """Decrypt a Fernet token with a passphrase-derived key."""
         key = cls.derive_key(passphrase, salt, iterations)
         try:
             return Fernet(key).decrypt(token.encode("utf-8")).decode("utf-8")
         except InvalidToken as exc:
-            raise WalletPassphraseError("Invalid passphrase or corrupted backup") from exc
+            raise WalletPassphraseError(
+                "Invalid passphrase or corrupted backup"
+            ) from exc
 
     # ------------------------------------------------------------------ #
     # CRUD operations
@@ -166,12 +172,16 @@ class WalletBackupService:
 
     def verify_passphrase(self, backup: WalletBackup, passphrase: str) -> bool:
         """Check a passphrase against the stored verifier without decrypting."""
-        derived = self.derive_key(passphrase, bytes.fromhex(backup.salt), backup.kdf_iterations)
+        derived = self.derive_key(
+            passphrase, bytes.fromhex(backup.salt), backup.kdf_iterations
+        )
         return secrets.compare_digest(
             hashlib.sha256(derived).hexdigest(), backup.verifier
         )
 
-    def restore_backup(self, user: User, backup_id: int, passphrase: str) -> WalletBackup:
+    def restore_backup(
+        self, user: User, backup_id: int, passphrase: str
+    ) -> WalletBackup:
         """Mark restore, bump last_restored_at, and return the backup.
 
         Raises WalletPassphraseError on a wrong passphrase. The client decrypts

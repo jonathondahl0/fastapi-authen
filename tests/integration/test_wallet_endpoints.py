@@ -67,7 +67,9 @@ class TestCreateWalletBackupEndpoint:
         assert body["kdf_iterations"] > 0
         assert body["salt"]
 
-    def test_create_backup_rejects_short_passphrase(self, authenticated_client, wallet_payload):
+    def test_create_backup_rejects_short_passphrase(
+        self, authenticated_client, wallet_payload
+    ):
         resp = authenticated_client.post(
             "/api/v1/wallets/",
             json={
@@ -80,7 +82,9 @@ class TestCreateWalletBackupEndpoint:
         )
         assert resp.status_code == 422
 
-    def test_create_backup_validates_wallet_address(self, authenticated_client, wallet_payload):
+    def test_create_backup_validates_wallet_address(
+        self, authenticated_client, wallet_payload
+    ):
         resp = authenticated_client.post(
             "/api/v1/wallets/",
             json={
@@ -107,11 +111,16 @@ class TestCreateWalletBackupEndpoint:
         )
         assert resp.status_code == 422
 
-    def test_create_backup_rejects_mismatched_passphrase(self, authenticated_client, wallet_payload):
+    def test_create_backup_rejects_mismatched_passphrase(
+        self, authenticated_client, wallet_payload
+    ):
         """Ciphertext that does not decrypt with the passphrase must be rejected."""
         other_salt = os.urandom(16).hex()
         other_token = WalletBackupService.encrypt_payload(
-            wallet_payload["payload"], "a-different-pass", bytes.fromhex(other_salt), 200_000
+            wallet_payload["payload"],
+            "a-different-pass",
+            bytes.fromhex(other_salt),
+            200_000,
         )
         resp = authenticated_client.post(
             "/api/v1/wallets/",
@@ -137,7 +146,9 @@ class TestListAndGetBackups:
         assert len(body) == 2
         assert {item["label"] for item in body} == {"One", "Two"}
 
-    def test_get_single_backup_returns_ciphertext(self, authenticated_client, wallet_payload):
+    def test_get_single_backup_returns_ciphertext(
+        self, authenticated_client, wallet_payload
+    ):
         created = create_backup(authenticated_client, wallet_payload).json()
 
         resp = authenticated_client.get(f"/api/v1/wallets/{created['id']}")
@@ -209,4 +220,7 @@ class TestUpdateAndDelete:
 
         # Deleted backups should no longer be listed or fetchable
         assert authenticated_client.get("/api/v1/wallets/").json() == []
-        assert authenticated_client.get(f"/api/v1/wallets/{created['id']}").status_code == 404
+        assert (
+            authenticated_client.get(f"/api/v1/wallets/{created['id']}").status_code
+            == 404
+        )

@@ -4,21 +4,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User as UserModel
-from app.schemas.wallet import (
-    WalletBackupCreate,
-    WalletBackupUpdate,
-    WalletBackupMeta,
-    WalletBackupResponse,
-    WalletRestoreRequest,
-    WalletRestoreResponse,
-)
-from app.services.wallet import (
-    WalletBackupService,
-    WalletBackupError,
-    WalletBackupNotFound,
-    WalletPassphraseError,
-    WalletBackupLimitError,
-)
+from app.schemas.wallet import (WalletBackupCreate, WalletBackupMeta,
+                                WalletBackupResponse, WalletBackupUpdate,
+                                WalletRestoreRequest, WalletRestoreResponse)
+from app.services.wallet import (WalletBackupError, WalletBackupLimitError,
+                                 WalletBackupNotFound, WalletBackupService,
+                                 WalletPassphraseError)
 
 router = APIRouter()
 
