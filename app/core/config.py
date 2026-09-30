@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # Wallet Backup Configuration
     WALLET_BACKUP_KDF_ITERATIONS: int = 200_000
     WALLET_BACKUP_MAX_PER_USER: int = 10
+
+    # System Wallet Withdrawals (admin)
+    # execution modes: "simulation" (in-app, clearly marked), "manual"
+    # (operator signs externally and submits the tx hash), "disabled" (lock down)
+    SYSTEM_WALLET_EXECUTION_MODE: str = "simulation"
+    SYSTEM_WALLET_REQUIRE_DUAL_APPROVAL: bool = True
+    SYSTEM_WALLET_DAILY_WITHDRAWAL_LIMIT: str = "100000"  # per wallet + asset / 24h
     
     class Config:
         env_file = ".env"
