@@ -42,6 +42,15 @@ A comprehensive authentication API built with FastAPI, featuring user registrati
 - ✅ Comprehensive API Documentation
 - ✅ Database Migrations with Alembic
 
+### Wallet System (Non-Custodial)
+- ✅ Multi-Wallet Registry (HD / imported / watch-only, multi-chain)
+- ✅ Primary Wallet Management
+- ✅ Encrypted Wallet Backups (PBKDF2 + Fernet, client-side encryption)
+- ✅ Passphrase-Verified Restore (server never stores passphrase or keys)
+- ✅ Address Book for Saved Recipients
+- ✅ Per-Wallet Activity Audit Trail
+- ✅ Wallet & Backup Statistics
+
 ## Quick Start
 
 ### 1. Clone the Repository
@@ -144,13 +153,30 @@ Once the server is running, you can access:
 - `POST /api/v1/mfa/disable` - Disable MFA
 - `GET /api/v1/mfa/status` - Get MFA status
 
-### Wallet Backups (Non-Custodial)
-- `POST /api/v1/wallets/` - Create encrypted wallet backup
-- `GET /api/v1/wallets/` - List wallet backups (metadata only)
-- `GET /api/v1/wallets/{backup_id}` - Get backup with ciphertext
-- `POST /api/v1/wallets/{backup_id}/restore` - Verify passphrase & fetch encrypted payload
-- `PUT /api/v1/wallets/{backup_id}` - Update backup metadata
-- `DELETE /api/v1/wallets/{backup_id}` - Soft-delete backup
+### Wallet Management (Non-Custodial)
+- `POST /api/v1/wallets/` - Register a wallet (optionally with its encrypted backup)
+- `GET /api/v1/wallets/` - List wallets (filter by `chain`, `wallet_type`)
+- `GET /api/v1/wallets/stats` - Wallet & backup statistics
+- `GET /api/v1/wallets/{wallet_id}` - Wallet details with backup aggregates
+- `PUT /api/v1/wallets/{wallet_id}` - Update wallet label/description
+- `POST /api/v1/wallets/{wallet_id}/primary` - Set primary wallet
+- `DELETE /api/v1/wallets/{wallet_id}` - Soft-delete wallet (auto-promotes next primary)
+- `GET /api/v1/wallets/{wallet_id}/activity` - Wallet audit trail (paginated)
+
+### Wallet Backups
+- `POST /api/v1/backups/` - Create encrypted backup (optional `wallet_id` link)
+- `GET /api/v1/backups/` - List backups (metadata only, filter by `wallet_id`)
+- `GET /api/v1/backups/{backup_id}` - Get backup with ciphertext
+- `POST /api/v1/backups/{backup_id}/restore` - Verify passphrase & fetch encrypted payload
+- `PUT /api/v1/backups/{backup_id}` - Update backup metadata
+- `DELETE /api/v1/backups/{backup_id}` - Soft-delete backup
+
+### Address Book
+- `POST /api/v1/address-book/` - Save a recipient address
+- `GET /api/v1/address-book/` - List saved addresses (filter by `chain`, `search`)
+- `GET /api/v1/address-book/{entry_id}` - Get one entry
+- `PUT /api/v1/address-book/{entry_id}` - Update an entry
+- `DELETE /api/v1/address-book/{entry_id}` - Delete an entry
 
 ### OAuth2
 - `GET /api/v1/oauth/google` - Google OAuth2 login
@@ -158,13 +184,13 @@ Once the server is running, you can access:
 - `GET /api/v1/oauth/github` - GitHub OAuth2 login
 - `GET /api/v1/oauth/github/callback` - GitHub OAuth2 callback
 
-### Wallet Backup Usage (Non-Custodial)
+### Wallet System Usage (Non-Custodial)
 
-The server **never** sees your wallet keys or passphrase. The client encrypts locally (PBKDF2-SHA256 + Fernet) and submits only ciphertext.
+The server **never** sees your wallet keys or passphrase. The client encrypts locally (PBKDF2-SHA256 + Fernet) and submits only ciphertext. The registry stores public metadata only.
 
 **Client-side encryption** (before calling the API):
 ```python
-import os, base64, hashlib
+import os, base64
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -179,29 +205,40 @@ key = base64.urlsafe_b64encode(kdf.derive(passphrase.encode()))
 encrypted = Fernet(key).encrypt(wallet_json.encode()).decode()
 ```
 
-**Create a backup:**
+**Register a wallet with its encrypted backup (atomic):**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/wallets/" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "label": "Main Wallet",
-    "wallet_address": "0x1234567890abcdef1234567890abcdef12345678",
-    "encrypted_data": "<Fernet token from client-side encryption>",
-    "salt": "<hex salt used>",
-    "kdf_iterations": 200000,
-    "passphrase": "your-secret-passphrase"
+    "address": "0x1234567890abcdef1234567890abcdef12345678",
+    "wallet_type": "hd",
+    "make_primary": true,
+    "backup": {
+      "encrypted_data": "<Fernet token from client-side encryption>",
+      "salt": "<hex salt used>",
+      "kdf_iterations": 200000,
+      "passphrase": "your-secret-passphrase"
+    }
   }'
 ```
+An existing wallet can also get additional encrypted backups via `POST /api/v1/backups/` with its `wallet_id`.
 
 **Restore (verify passphrase, then decrypt locally):**
 ```bash
-curl -X POST "http://localhost:8000/api/v1/wallets/1/restore" \
+curl -X POST "http://localhost:8000/api/v1/backups/1/restore" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"passphrase": "your-secret-passphrase"}'
 ```
 The response returns `ciphertext`, `salt`, and `kdf_iterations`; decrypt locally with the same PBKDF2+Fernet parameters to recover the wallet JSON.
+
+**Safety behaviors built into the system:**
+- Registering a wallet whose backup does not decrypt with the supplied passphrase is rejected atomically (no half-created wallet).
+- Wrong passphrases are rejected via a stored derived-key verifier — the server can never decrypt backups itself.
+- Deleting a wallet keeps its encrypted backups and auto-promotes the oldest remaining wallet to primary.
+- All wallet operations are recorded in a per-wallet audit trail.
 
 ## Usage Examples
 

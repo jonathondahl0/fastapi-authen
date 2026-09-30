@@ -3,8 +3,9 @@
 Encryption design:
 - A passphrase-derived key is generated with PBKDF2-HMAC-SHA256 using a random
   per-backup salt and configurable iteration count.
-- The wallet payload (private key / mnemonic JSON) is encrypted with Fernet
-  (AES-128-CBC + HMAC-SHA256, authenticated).
+- The wallet payload (private key / mnemonic JSON) is encrypted client-side
+  with Fernet (AES-128-CBC + HMAC-SHA256, authenticated); the server stores
+  the ciphertext verbatim.
 - The passphrase is never stored. A SHA-256 hash of the *derived key* is stored
   as a verifier: it proves knowledge of the passphrase without enabling
   decryption of any other backup (keys are salted per backup).
@@ -20,9 +21,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.models.user import User
 from app.models.wallet import WalletBackup
+from app.services import activity
 
 
 class WalletBackupError(Exception):
@@ -95,6 +96,7 @@ class WalletBackupService:
         passphrase: str,
         salt: str,
         kdf_iterations: int,
+        wallet_id: Optional[int] = None,
         wallet_address: Optional[str] = None,
     ) -> WalletBackup:
         """Create a new encrypted wallet backup.
@@ -103,8 +105,7 @@ class WalletBackupService:
         which encrypted the wallet payload with ``passphrase`` and the
         client-generated ``salt``/``kdf_iterations``. The server stores the
         ciphertext verbatim, derives only a verifier from the passphrase, and
-        confirms the pair is consistent (wrong passphrase would produce a
-        verifier that fails at restore time).
+        confirms the pair is consistent.
         """
         count = (
             self.db.query(WalletBackup)
@@ -121,7 +122,7 @@ class WalletBackupService:
         except ValueError as exc:
             raise WalletBackupError("salt must be hex-encoded") from exc
 
-        # Optional self-check: the ciphertext must decrypt with the supplied
+        # Self-check: the ciphertext must decrypt with the supplied
         # passphrase/parameters, proving the payload matches the passphrase.
         try:
             self.decrypt_payload(encrypted_data, passphrase, salt_bytes, kdf_iterations)
@@ -136,6 +137,7 @@ class WalletBackupService:
 
         backup = WalletBackup(
             user_id=user.id,
+            wallet_id=wallet_id,
             label=label,
             wallet_address=wallet_address,
             ciphertext=encrypted_data,
@@ -146,6 +148,14 @@ class WalletBackupService:
         self.db.add(backup)
         self.db.commit()
         self.db.refresh(backup)
+
+        activity.record_activity(
+            self.db,
+            user.id,
+            activity.BACKUP_CREATED,
+            wallet_id=wallet_id,
+            detail={"backup_id": backup.id, "label": backup.label},
+        )
         return backup
 
     def get_backup(self, user: User, backup_id: int) -> WalletBackup:
@@ -162,13 +172,15 @@ class WalletBackupService:
             raise WalletBackupNotFound("Wallet backup not found")
         return backup
 
-    def list_backups(self, user: User) -> List[WalletBackup]:
-        return (
-            self.db.query(WalletBackup)
-            .filter(WalletBackup.user_id == user.id, WalletBackup.is_active == True)
-            .order_by(WalletBackup.created_at.desc())
-            .all()
+    def list_backups(
+        self, user: User, wallet_id: Optional[int] = None
+    ) -> List[WalletBackup]:
+        query = self.db.query(WalletBackup).filter(
+            WalletBackup.user_id == user.id, WalletBackup.is_active == True
         )
+        if wallet_id is not None:
+            query = query.filter(WalletBackup.wallet_id == wallet_id)
+        return query.order_by(WalletBackup.created_at.desc()).all()
 
     def verify_passphrase(self, backup: WalletBackup, passphrase: str) -> bool:
         """Check a passphrase against the stored verifier without decrypting."""
@@ -185,8 +197,7 @@ class WalletBackupService:
         """Mark restore, bump last_restored_at, and return the backup.
 
         Raises WalletPassphraseError on a wrong passphrase. The client decrypts
-        the ciphertext locally; the server never handles plaintext wallet data
-        beyond what it re-encrypted at creation time.
+        the ciphertext locally; the server never handles plaintext wallet data.
         """
         backup = self.get_backup(user, backup_id)
 
@@ -196,6 +207,14 @@ class WalletBackupService:
         backup.last_restored_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(backup)
+
+        activity.record_activity(
+            self.db,
+            user.id,
+            activity.BACKUP_RESTORED,
+            wallet_id=backup.wallet_id,
+            detail={"backup_id": backup.id, "label": backup.label},
+        )
         return backup
 
     def update_backup(
@@ -206,12 +225,24 @@ class WalletBackupService:
         wallet_address: Optional[str] = None,
     ) -> WalletBackup:
         backup = self.get_backup(user, backup_id)
+        changed = []
         if label is not None:
             backup.label = label
+            changed.append("label")
         if wallet_address is not None:
             backup.wallet_address = wallet_address
+            changed.append("wallet_address")
         self.db.commit()
         self.db.refresh(backup)
+
+        if changed:
+            activity.record_activity(
+                self.db,
+                user.id,
+                activity.BACKUP_UPDATED,
+                wallet_id=backup.wallet_id,
+                detail={"backup_id": backup.id, "fields": changed},
+            )
         return backup
 
     def delete_backup(self, user: User, backup_id: int) -> bool:
@@ -219,4 +250,12 @@ class WalletBackupService:
         backup = self.get_backup(user, backup_id)
         backup.is_active = False
         self.db.commit()
+
+        activity.record_activity(
+            self.db,
+            user.id,
+            activity.BACKUP_DELETED,
+            wallet_id=backup.wallet_id,
+            detail={"backup_id": backup.id, "label": backup.label},
+        )
         return True
