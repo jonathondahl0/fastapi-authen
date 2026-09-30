@@ -51,6 +51,14 @@ A comprehensive authentication API built with FastAPI, featuring user registrati
 - ✅ Per-Wallet Activity Audit Trail
 - ✅ Wallet & Backup Statistics
 
+### System Wallet Withdrawals (Admin/Ops)
+- ✅ Server-operated Wallet Registry (keys stay in external KMS/HSM)
+- ✅ Approval Lifecycle with Dual Approval (pending → approved → submitted → confirmed)
+- ✅ Daily Limits per Wallet + Asset
+- ✅ Idempotent Requests (safe retries for payout batches)
+- ✅ Simulation / Manual / Disabled Execution Modes
+- ✅ Full Withdrawal Audit Trail with Acting Admin
+
 ## Quick Start
 
 ### 1. Clone the Repository
@@ -178,6 +186,22 @@ Once the server is running, you can access:
 - `PUT /api/v1/address-book/{entry_id}` - Update an entry
 - `DELETE /api/v1/address-book/{entry_id}` - Delete an entry
 
+### System Wallet Withdrawals (Admin only, `is_superuser`)
+- `POST /api/v1/admin/system-wallets` - Register a server-operated wallet
+- `GET /api/v1/admin/system-wallets` - List system wallets (`include_inactive`)
+- `GET /api/v1/admin/system-wallets/{wallet_id}` - Get one system wallet
+- `PUT /api/v1/admin/system-wallets/{wallet_id}` - Update metadata
+- `DELETE /api/v1/admin/system-wallets/{wallet_id}` - Deactivate (soft delete)
+- `POST /api/v1/admin/system-wallets/{wallet_id}/withdrawals` - Request a withdrawal (`pending`)
+- `GET /api/v1/admin/withdrawals` - List withdrawals (filter by `status`, `system_wallet_id`)
+- `GET /api/v1/admin/withdrawals/{withdrawal_id}` - Get one withdrawal
+- `POST /api/v1/admin/withdrawals/{id}/approve` - Approve (dual approval enforced)
+- `POST /api/v1/admin/withdrawals/{id}/cancel` - Cancel (pending/approved only)
+- `POST /api/v1/admin/withdrawals/{id}/submit` - Execute (simulation auto-confirms; manual requires `tx_hash`)
+- `POST /api/v1/admin/withdrawals/{id}/confirm` - Record on-chain confirmation
+- `POST /api/v1/admin/withdrawals/{id}/fail` - Mark failed with an error reason
+- `GET /api/v1/admin/withdrawals/{id}/events` - Audit trail for a withdrawal
+
 ### OAuth2
 - `GET /api/v1/oauth/google` - Google OAuth2 login
 - `GET /api/v1/oauth/google/callback` - Google OAuth2 callback
@@ -239,6 +263,57 @@ The response returns `ciphertext`, `salt`, and `kdf_iterations`; decrypt locally
 - Wrong passphrases are rejected via a stored derived-key verifier — the server can never decrypt backups itself.
 - Deleting a wallet keeps its encrypted backups and auto-promotes the oldest remaining wallet to primary.
 - All wallet operations are recorded in a per-wallet audit trail.
+
+### System Wallet Withdrawals (Production / Ops)
+
+Withdrawals from server-operated (system) wallets follow a strict admin-only lifecycle: `pending → approved → submitted → confirmed` (or `cancelled` / `failed`). Private keys are **never stored in this database** — `signer_reference` records where signing happens (KMS key id, HSM slot, or custody provider reference).
+
+**Production configuration** (environment variables):
+```env
+# simulation (default, clearly flagged) | manual | disabled
+SYSTEM_WALLET_EXECUTION_MODE=manual
+# require a second admin to approve a withdrawal
+SYSTEM_WALLET_REQUIRE_DUAL_APPROVAL=true
+# per system wallet + asset, rolling 24h
+SYSTEM_WALLET_DAILY_WITHDRAWAL_LIMIT=100000
+```
+
+**Typical production flow (manual mode):**
+```bash
+# 1. Admin registers the treasury wallet (keys stay in KMS/HSM)
+curl -X POST "http://localhost:8000/api/v1/admin/system-wallets" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "Treasury", "address": "0x...", "signer_reference": "kms://huanchain/treasury-1"}'
+
+# 2. Request a withdrawal (starts pending)
+curl -X POST "http://localhost:8000/api/v1/admin/system-wallets/1/withdrawals" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to_address": "0x...", "amount": "1500.5", "idempotency_key": "payout-batch-42-1"}'
+
+# 3. A SECOND admin approves (dual approval)
+curl -X POST "http://localhost:8000/api/v1/admin/withdrawals/1/approve" \
+  -H "Authorization: Bearer SECOND_ADMIN_TOKEN"
+
+# 4. Operator signs the transaction externally (KMS/HSM), then records it
+curl -X POST "http://localhost:8000/api/v1/admin/withdrawals/1/submit" \
+  -H "Authorization: Bearer ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tx_hash": "0x<real tx hash>"}'
+
+# 5. After the transaction confirms on-chain
+curl -X POST "http://localhost:8000/api/v1/admin/withdrawals/1/confirm" \
+  -H "Authorization: Bearer ADMIN_TOKEN"
+```
+
+**Safety behaviors:**
+- Dual approval blocks the same admin from approving their own request (configurable).
+- Rolling 24h daily limits per wallet + asset reject over-limit requests (`409`).
+- `idempotency_key` replays return the original request instead of duplicating it.
+- Simulation mode never claims a real transaction: responses are flagged `simulated: true`.
+- `SYSTEM_WALLET_EXECUTION_MODE=disabled` locks down submission entirely.
+- Every state transition is recorded in the withdrawal's audit trail with the acting admin.
 
 ## Usage Examples
 

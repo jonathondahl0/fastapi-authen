@@ -72,3 +72,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     
     return user
+
+def get_current_superuser(current_user: User = Depends(get_current_user)) -> User:
+    """Require a superuser (admin) account for system wallet operations."""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superuser privileges required",
+        )
+    return current_user
