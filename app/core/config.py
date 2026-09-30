@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # Rate Limiting Configuration
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_PER_MINUTE: int = 60
+
+    # Wallet Backup Configuration
+    WALLET_BACKUP_KDF_ITERATIONS: int = 200_000
+    WALLET_BACKUP_MAX_PER_USER: int = 10
     
     class Config:
         env_file = ".env"

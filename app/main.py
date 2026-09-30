@@ -39,10 +39,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors."""
-    logger.error(f"Validation error: {exc.errors()}")
+    # Pydantic v2 includes exception objects inside ctx, which are not
+    # JSON-serializable; stringify them so the response can be encoded.
+    clean_errors = []
+    for err in exc.errors():
+        err = dict(err)
+        err.pop("url", None)
+        ctx = err.pop("ctx", None)
+        if ctx:
+            err["ctx"] = {k: str(v) for k, v in ctx.items()}
+        clean_errors.append(err)
+    logger.error(f"Validation error: {clean_errors}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()},
+        content={"detail": clean_errors},
     )
 
 

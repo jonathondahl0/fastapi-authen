@@ -144,11 +144,64 @@ Once the server is running, you can access:
 - `POST /api/v1/mfa/disable` - Disable MFA
 - `GET /api/v1/mfa/status` - Get MFA status
 
+### Wallet Backups (Non-Custodial)
+- `POST /api/v1/wallets/` - Create encrypted wallet backup
+- `GET /api/v1/wallets/` - List wallet backups (metadata only)
+- `GET /api/v1/wallets/{backup_id}` - Get backup with ciphertext
+- `POST /api/v1/wallets/{backup_id}/restore` - Verify passphrase & fetch encrypted payload
+- `PUT /api/v1/wallets/{backup_id}` - Update backup metadata
+- `DELETE /api/v1/wallets/{backup_id}` - Soft-delete backup
+
 ### OAuth2
 - `GET /api/v1/oauth/google` - Google OAuth2 login
 - `GET /api/v1/oauth/google/callback` - Google OAuth2 callback
 - `GET /api/v1/oauth/github` - GitHub OAuth2 login
 - `GET /api/v1/oauth/github/callback` - GitHub OAuth2 callback
+
+### Wallet Backup Usage (Non-Custodial)
+
+The server **never** sees your wallet keys or passphrase. The client encrypts locally (PBKDF2-SHA256 + Fernet) and submits only ciphertext.
+
+**Client-side encryption** (before calling the API):
+```python
+import os, base64, hashlib
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+passphrase = "your-secret-passphrase"
+salt = os.urandom(16).hex()
+iterations = 200_000
+wallet_json = '{"mnemonic": "...", "private_key": "..."}'
+
+kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=bytes.fromhex(salt), iterations=iterations)
+key = base64.urlsafe_b64encode(kdf.derive(passphrase.encode()))
+encrypted = Fernet(key).encrypt(wallet_json.encode()).decode()
+```
+
+**Create a backup:**
+```bash
+curl -X POST "http://localhost:8000/api/v1/wallets/" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Main Wallet",
+    "wallet_address": "0x1234567890abcdef1234567890abcdef12345678",
+    "encrypted_data": "<Fernet token from client-side encryption>",
+    "salt": "<hex salt used>",
+    "kdf_iterations": 200000,
+    "passphrase": "your-secret-passphrase"
+  }'
+```
+
+**Restore (verify passphrase, then decrypt locally):**
+```bash
+curl -X POST "http://localhost:8000/api/v1/wallets/1/restore" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"passphrase": "your-secret-passphrase"}'
+```
+The response returns `ciphertext`, `salt`, and `kdf_iterations`; decrypt locally with the same PBKDF2+Fernet parameters to recover the wallet JSON.
 
 ## Usage Examples
 
